@@ -1,0 +1,13 @@
+# docs/ and docs/adr/ are part of the repository. Do not ignore them.
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.env
+.coverage
+htmlcov/
+dist/
+*.egg-info/

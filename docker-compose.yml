@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: profitsamurai
+      POSTGRES_PASSWORD: profitsamurai
+      POSTGRES_DB: profitsamurai_service
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U profitsamurai -d profitsamurai_service"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    command: ["uvicorn", "profitsamurai.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://profitsamurai:profitsamurai@postgres:5432/profitsamurai_service
+      FERNET_KEY: ${FERNET_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-change-me}
+      YM_API_BASE: ${YM_API_BASE:-https://api.partner.market.yandex.ru}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
