@@ -1,9 +1,11 @@
-"""Request bodies and responses for the cabinet endpoints."""
+"""JSON contract for connecting a shop. Field names match the previous body."""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class CabinetCreate(BaseModel):
+class ShopCreate(BaseModel):
+    model_config = ConfigDict(title="CabinetCreate")
+
     api_key: str = Field(min_length=1, max_length=4096)
 
     @field_validator("api_key")
@@ -15,6 +17,8 @@ class CabinetCreate(BaseModel):
         return stripped
 
 
-class CabinetOut(BaseModel):
+class ShopOut(BaseModel):
+    model_config = ConfigDict(title="CabinetOut")
+
     business_id: int
     campaign_ids: list[int]

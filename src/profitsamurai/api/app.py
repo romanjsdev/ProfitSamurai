@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from profitsamurai.api.deps import AppState
-from profitsamurai.api.routers.cabinets import router as cabinets_router
 from profitsamurai.api.routers.clients import router as clients_router
 from profitsamurai.config import get_settings
 from profitsamurai.db.migrate import migrate_service
@@ -30,7 +29,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     application = FastAPI(title="ProfitSamurai", lifespan=lifespan)
-    application.include_router(cabinets_router)
     application.include_router(clients_router)
     return application
 

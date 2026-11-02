@@ -1,4 +1,9 @@
-"""Service database: the client registry and the original cabinet identifiers."""
+"""Service database registry.
+
+Revision 001 calls ServiceBase.metadata.create_all. That base stays empty so a
+fresh upgrade does not create the registry tables twice: revision 002 creates
+them explicitly. Registry models use a separate metadata.
+"""
 
 from uuid import UUID
 
@@ -15,27 +20,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class ServiceBase(DeclarativeBase):
-    pass
+    """Metadata used by revision 001. It intentionally has no tables."""
 
 
-class Cabinet(ServiceBase):
-    __tablename__ = "cabinets"
-
-    business_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    api_key_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+class RegistryBase(DeclarativeBase):
+    """Tables created by revision 002_client_registry."""
 
 
-class Campaign(ServiceBase):
-    __tablename__ = "campaigns"
-
-    campaign_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    business_id: Mapped[int] = mapped_column(
-        ForeignKey("cabinets.business_id", ondelete="CASCADE"),
-        index=True,
-    )
-
-
-class Client(ServiceBase):
+class Client(RegistryBase):
     """A seller company. This is not a Yandex cabinet and not a person."""
 
     __tablename__ = "clients"
@@ -44,7 +36,7 @@ class Client(ServiceBase):
     name: Mapped[str] = mapped_column(Text)
 
 
-class ClientDatabase(ServiceBase):
+class ClientDatabase(RegistryBase):
     """Name and provisioning status of that company's physical database."""
 
     __tablename__ = "client_databases"
@@ -64,7 +56,7 @@ class ClientDatabase(ServiceBase):
     status: Mapped[str] = mapped_column(Text)
 
 
-class Shop(ServiceBase):
+class Shop(RegistryBase):
     """A marketplace connection owned by one client."""
 
     __tablename__ = "shops"

@@ -13,7 +13,7 @@ from sqlalchemy.pool import NullPool
 
 from profitsamurai.config import get_settings
 from profitsamurai.db.migrate import migrate_service, migrate_tenant
-from profitsamurai.db.service.models import Cabinet, Client
+from profitsamurai.db.service.models import Client
 from profitsamurai.db.service.session import create_service_engine, create_session_factory
 from profitsamurai.integrations.yandex_market.campaigns import RemoteCampaign
 from profitsamurai.registry import (
@@ -39,6 +39,8 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
     settings = get_settings()
     if settings.postgres_admin_url == "":
         pytest.skip("POSTGRES_ADMIN_URL is required")
+    if make_url(settings.database_url).database == "profitsamurai_service":
+        pytest.skip("refusing to migrate the live service database")
     await migrate_service(settings.database_url)
     engine = create_service_engine(settings.database_url)
     factory = create_session_factory(engine)
@@ -116,8 +118,14 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
             (41, business_id, "FBS"),
             (42, business_id, "FBY"),
         ]
-        assert await _column_names(engine, "cabinets") == ["api_key_ciphertext", "business_id"]
-        assert await _column_names(engine, "campaigns") == ["business_id", "campaign_id"]
+        assert await _public_tables(engine) >= {
+            "clients",
+            "client_databases",
+            "shops",
+            "alembic_version",
+        }
+        assert "cabinets" not in await _public_tables(engine)
+        assert "campaigns" not in await _public_tables(engine)
     finally:
         if database_name is not None:
             await _drop_database(settings.postgres_admin_url, database_name)
@@ -126,9 +134,6 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
                 client = await session.get(Client, client_id)
                 if client is not None:
                     await session.delete(client)
-            cabinet = await session.get(Cabinet, business_id)
-            if cabinet is not None:
-                await session.delete(cabinet)
             await session.commit()
         await engine.dispose()
         get_settings.cache_clear()
@@ -166,20 +171,18 @@ async def _schema_names(settings: object, database_name: str) -> list[str]:
         await engine.dispose()
 
 
-async def _column_names(engine: object, table_name: str) -> list[str]:
+async def _public_tables(engine: object) -> set[str]:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     assert isinstance(engine, AsyncEngine)
     async with engine.connect() as conn:
         result = await conn.execute(
             text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = :table_name "
-                "ORDER BY column_name"
-            ),
-            {"table_name": table_name},
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+            )
         )
-        return [str(row[0]) for row in result]
+        return {str(row[0]) for row in result}
 
 
 async def _assert_app_role_cannot_create_database(settings: object) -> None:

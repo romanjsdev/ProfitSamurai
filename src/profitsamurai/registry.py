@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from profitsamurai.cabinets import StoredCabinet, save_cabinets
+from profitsamurai.campaign_groups import StoredCabinet, group_campaigns
 from profitsamurai.config import Settings
 from profitsamurai.db.migrate import migrate_tenant
 from profitsamurai.db.service.models import Client, ClientDatabase, Shop
@@ -141,12 +141,7 @@ async def attach_shops(
         raise LookupError(client_id)
     if current.status != "ready":
         raise ClientNotReady("client database is not ready")
-    stored = await save_cabinets(
-        session,
-        fernet_key=settings.fernet_key,
-        api_key=api_key,
-        campaigns=campaigns,
-    )
+    stored = group_campaigns(campaigns)
     if not stored:
         return []
     ciphertext = encrypt_secret(api_key, settings.fernet_key)

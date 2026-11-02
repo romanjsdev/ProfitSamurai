@@ -1,4 +1,4 @@
-from profitsamurai.cabinets import group_campaigns
+from profitsamurai.campaign_groups import group_campaigns
 from profitsamurai.integrations.yandex_market.campaigns import RemoteCampaign
 from profitsamurai.types import BusinessId, CampaignId
 

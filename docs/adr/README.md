@@ -10,3 +10,5 @@
 - [0006. Наш API закрыт одним bootstrap-токеном](0006-bootstrap-token.md)
 - [0007. Отчёт по товарам печатается и не сохраняется](0007-print-goods-stats.md)
 - [0008. База на клиента, реестр в служебной базе](0008-client-database.md)
+- [0009. Прототип кабинетов снят](0009-drop-prototype-cabinets.md)
+- [0009. Прототип кабинетов снят](0009-drop-prototype-cabinets.md)

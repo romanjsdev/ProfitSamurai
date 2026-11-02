@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from profitsamurai.api.deps import get_service_session, require_bootstrap
-from profitsamurai.api.schemas.cabinets import CabinetCreate, CabinetOut
 from profitsamurai.api.schemas.clients import ClientCreate, ClientOut
+from profitsamurai.api.schemas.shops import ShopCreate, ShopOut
 from profitsamurai.config import Settings, get_settings
 from profitsamurai.integrations.yandex_market.campaigns import fetch_campaigns
 from profitsamurai.integrations.yandex_market.errors import YandexMarketError
@@ -28,8 +28,8 @@ def _out(record_id: UUID, name: str, database_name: str, status: str) -> ClientO
     return ClientOut(id=record_id, name=name, database_name=database_name, status=status)
 
 
-def _cabinet(business_id: int, campaign_ids: tuple[int, ...]) -> CabinetOut:
-    return CabinetOut(business_id=business_id, campaign_ids=list(campaign_ids))
+def _shop(business_id: int, campaign_ids: tuple[int, ...]) -> ShopOut:
+    return ShopOut(business_id=business_id, campaign_ids=list(campaign_ids))
 
 
 @router.post("/clients", response_model=ClientOut)
@@ -75,14 +75,14 @@ async def read_client(
     return _out(record.id, record.name, record.database_name, record.status)
 
 
-@router.post("/clients/{client_id}/shops", response_model=list[CabinetOut])
+@router.post("/clients/{client_id}/shops", response_model=list[ShopOut])
 async def connect_shop(
     client_id: UUID,
-    body: CabinetCreate,
+    body: ShopCreate,
     _: None = Depends(require_bootstrap),
     session: AsyncSession = Depends(get_service_session),
     settings: Settings = Depends(get_settings),
-) -> list[CabinetOut]:
+) -> list[ShopOut]:
     try:
         remote = await fetch_campaigns(body.api_key, settings.ym_api_base)
     except YandexMarketError as exc:
@@ -97,7 +97,7 @@ async def connect_shop(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if not stored:
         raise HTTPException(status_code=422, detail="campaigns did not include a business id")
-    return [_cabinet(item.business_id, item.campaign_ids) for item in stored]
+    return [_shop(item.business_id, item.campaign_ids) for item in stored]
 
 
 async def _finish_provision(
