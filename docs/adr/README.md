@@ -8,3 +8,5 @@
 - [0004. В базе только идентификаторы](0004-store-identifiers-only.md)
 - [0005. Api-Key хранится шифротекстом](0005-encrypt-the-api-key.md)
 - [0006. Наш API закрыт одним bootstrap-токеном](0006-bootstrap-token.md)
+- [0007. Отчёт по товарам печатается и не сохраняется](0007-print-goods-stats.md)
+- [0008. База на клиента, реестр в служебной базе](0008-client-database.md)

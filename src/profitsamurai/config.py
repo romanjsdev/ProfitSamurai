@@ -14,12 +14,24 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     bootstrap_token: str = ""
     ym_api_base: str = "https://api.partner.market.yandex.ru"
+    postgres_admin_url: str = ""
+    app_db_password: str = ""
+    datalens_db_password: str = ""
 
     @field_validator("database_url")
     @classmethod
     def database_url_uses_asyncpg(cls, value: str) -> str:
         if not value.startswith("postgresql+asyncpg://"):
             raise ValueError("database_url must use the postgresql+asyncpg driver")
+        return value
+
+    @field_validator("postgres_admin_url")
+    @classmethod
+    def admin_url_uses_asyncpg(cls, value: str) -> str:
+        if value == "":
+            return value
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError("postgres_admin_url must use the postgresql+asyncpg driver")
         return value
 
     @field_validator("fernet_key")

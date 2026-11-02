@@ -22,6 +22,7 @@ def test_parse_keeps_only_ids() -> None:
     assert len(rows) == 1
     assert rows[0].business_id == 5
     assert rows[0].campaign_id == 10
+    assert rows[0].placement_type == "FBS"
 
 
 def test_parse_skips_a_campaign_without_a_business() -> None:
@@ -37,4 +38,6 @@ def test_parse_reads_result_wrapper() -> None:
     )
     rows, pages = parse_campaign_page(payload)
     assert pages == 2
-    assert [(row.business_id, row.campaign_id) for row in rows] == [(8, 3)]
+    assert [(row.business_id, row.campaign_id, row.placement_type) for row in rows] == [
+        (8, 3, None)
+    ]

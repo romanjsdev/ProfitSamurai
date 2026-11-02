@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import httpx
 
 from profitsamurai.integrations.yandex_market.client import YandexMarketClient
-from profitsamurai.jsonutil import JsonObject, as_object_list, nested_object, pick_int
+from profitsamurai.jsonutil import JsonObject, as_object_list, nested_object, pick_int, pick_str
 from profitsamurai.types import BusinessId, CampaignId
 
 
@@ -13,6 +13,7 @@ from profitsamurai.types import BusinessId, CampaignId
 class RemoteCampaign:
     business_id: BusinessId
     campaign_id: CampaignId
+    placement_type: str | None = None
 
 
 def parse_campaign_page(payload: JsonObject) -> tuple[list[RemoteCampaign], int | None]:
@@ -29,6 +30,7 @@ def parse_campaign_page(payload: JsonObject) -> tuple[list[RemoteCampaign], int 
             RemoteCampaign(
                 business_id=BusinessId(business_id),
                 campaign_id=CampaignId(campaign_id),
+                placement_type=pick_str(row, "placementType"),
             )
         )
     pager = nested_object(body, "pager")

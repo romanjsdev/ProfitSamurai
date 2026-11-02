@@ -9,7 +9,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY alembic.service.ini ./
+COPY alembic.tenant.ini ./
 COPY migrations/service ./migrations/service
+COPY migrations/tenant ./migrations/tenant
 
 RUN pip install --no-cache-dir .
 

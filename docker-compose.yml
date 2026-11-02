@@ -20,6 +20,9 @@ services:
     command: ["uvicorn", "profitsamurai.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       DATABASE_URL: postgresql+asyncpg://profitsamurai:profitsamurai@postgres:5432/profitsamurai_service
+      POSTGRES_ADMIN_URL: postgresql+asyncpg://profitsamurai:profitsamurai@postgres:5432/postgres
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-profitsamurai_app}
+      DATALENS_DB_PASSWORD: ${DATALENS_DB_PASSWORD:-profitsamurai_datalens}
       FERNET_KEY: ${FERNET_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       BOOTSTRAP_TOKEN: ${BOOTSTRAP_TOKEN:-change-me}
       YM_API_BASE: ${YM_API_BASE:-https://api.partner.market.yandex.ru}

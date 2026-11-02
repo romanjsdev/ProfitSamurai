@@ -53,10 +53,28 @@ class YandexMarketClient:
             self._http = None
 
     async def get(self, path: str, params: dict[str, str]) -> JsonObject:
+        return await self._send("GET", path, params=params, body=None)
+
+    async def post(
+        self,
+        path: str,
+        body: JsonObject,
+        params: dict[str, str] | None = None,
+    ) -> JsonObject:
+        return await self._send("POST", path, params=params, body=body)
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None,
+        body: JsonObject | None,
+    ) -> JsonObject:
         http = self._require_http()
         for attempt in range(1, self._attempts + 1):
             try:
-                response = await http.get(path, params=params)
+                response = await http.request(method, path, params=params, json=body)
             except httpx.TransportError:
                 if attempt == self._attempts:
                     raise

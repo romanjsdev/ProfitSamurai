@@ -48,6 +48,13 @@ def as_object_list(value: JsonValue | None) -> list[JsonObject]:
     return objects
 
 
+def pick_str(row: JsonObject, key: str) -> str | None:
+    value = row.get(key)
+    if isinstance(value, str) and value != "":
+        return value
+    return None
+
+
 def pick_int(row: JsonObject, key: str) -> int | None:
     value = row.get(key)
     if isinstance(value, bool) or value is None:

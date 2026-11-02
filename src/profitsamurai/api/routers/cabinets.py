@@ -9,6 +9,7 @@ from profitsamurai.cabinets import load_cabinet, save_cabinets
 from profitsamurai.config import Settings, get_settings
 from profitsamurai.integrations.yandex_market.campaigns import fetch_campaigns
 from profitsamurai.integrations.yandex_market.errors import YandexMarketError
+from profitsamurai.integrations.yandex_market.goods_stats import print_goods_stats
 
 router = APIRouter(tags=["cabinets"])
 
@@ -36,7 +37,15 @@ async def sync_cabinets(
     )
     if not stored:
         raise HTTPException(status_code=422, detail="campaigns did not include a business id")
-    return [_out(item.business_id, item.campaign_ids) for item in stored]
+    try:
+        for item in stored:
+            for campaign_id in item.campaign_ids:
+                await print_goods_stats(body.api_key, settings.ym_api_base, campaign_id)
+    except YandexMarketError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    result = [_out(item.business_id, item.campaign_ids) for item in stored]
+    print(result)
+    return result
 
 
 @router.get("/cabinets/{business_id}", response_model=CabinetOut)
