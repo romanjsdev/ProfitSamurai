@@ -12,10 +12,10 @@ SRC = ROOT / "src"
 if SRC.is_dir():
     sys.path.insert(0, str(SRC))
 
-from profitsamurai.db.service.models import RegistryBase  # noqa: E402
+from profitsamurai.db.service.models import ServiceBase  # noqa: E402
 
 config = context.config
-target_metadata = RegistryBase.metadata
+target_metadata = ServiceBase.metadata
 
 
 def run_migrations_offline() -> None:

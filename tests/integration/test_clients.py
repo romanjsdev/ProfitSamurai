@@ -1,4 +1,8 @@
-"""Provision a client database. Set RUN_INTEGRATION=1 and the admin URL."""
+"""Provision a client database on an isolated server.
+
+Set RUN_INTEGRATION=1, INTEGRATION_DATABASE_URL, and INTEGRATION_ADMIN_URL.
+The URLs are checked before any connection. DATABASE_URL is not a fallback.
+"""
 
 import os
 import re
@@ -11,7 +15,7 @@ from sqlalchemy.exc import ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from profitsamurai.config import get_settings
+from profitsamurai.config import Settings
 from profitsamurai.db.migrate import migrate_service, migrate_tenant
 from profitsamurai.db.service.models import Client
 from profitsamurai.db.service.session import create_service_engine, create_session_factory
@@ -26,6 +30,8 @@ from profitsamurai.registry import (
 )
 from profitsamurai.types import BusinessId, CampaignId
 
+from .isolation import IntegrationTargetError, resolve_integration_targets
+
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_INTEGRATION") != "1",
     reason="set RUN_INTEGRATION=1 to provision a client database",
@@ -35,13 +41,17 @@ _NAME = re.compile(r"^client_[0-9a-f]{32}$")
 
 
 async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    get_settings.cache_clear()
-    settings = get_settings()
-    if settings.postgres_admin_url == "":
-        pytest.skip("POSTGRES_ADMIN_URL is required")
-    if make_url(settings.database_url).database == "profitsamurai_service":
-        pytest.skip("refusing to migrate the live service database")
-    await migrate_service(settings.database_url)
+    try:
+        service_url, admin_url = resolve_integration_targets(
+            integration_database_url=os.getenv("INTEGRATION_DATABASE_URL", ""),
+            integration_admin_url=os.getenv("INTEGRATION_ADMIN_URL", ""),
+            application_database_url=os.getenv("DATABASE_URL", ""),
+            application_admin_url=os.getenv("POSTGRES_ADMIN_URL", ""),
+        )
+    except IntegrationTargetError as exc:
+        pytest.fail(str(exc))
+    settings = Settings(database_url=service_url, postgres_admin_url=admin_url)
+    await migrate_service(service_url)
     engine = create_service_engine(settings.database_url)
     factory = create_session_factory(engine)
     client_id: UUID | None = None
@@ -76,6 +86,12 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
                 database_name,
             )
         )
+        assert not await _database_privilege(
+            settings.postgres_admin_url,
+            "profitsamurai_datalens",
+            database_name,
+            "CONNECT",
+        )
 
         monkeypatch.setattr("profitsamurai.registry.migrate_tenant", migrate_tenant)
         async with factory() as session:
@@ -84,6 +100,8 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
         assert ready.database_name == database_name
         assert await _database_count(settings.postgres_admin_url, database_name) == 1
         assert await _schema_names(settings, database_name) == ["analytics", "raw", "ref"]
+        assert await _tenant_revision(settings, database_name) == "001_tenant"
+        await _assert_datalens_restored(settings, database_name)
         await _assert_app_role_cannot_create_database(settings)
         assert await _can_query(
             _role_url(
@@ -136,7 +154,6 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
                     await session.delete(client)
             await session.commit()
         await engine.dispose()
-        get_settings.cache_clear()
 
 
 async def _database_count(admin_url: str, database_name: str) -> int:
@@ -150,6 +167,90 @@ async def _database_count(admin_url: str, database_name: str) -> int:
     finally:
         await engine.dispose()
     return int(counted or 0)
+
+
+async def _tenant_revision(settings: object, database_name: str) -> str:
+    from profitsamurai.config import Settings
+
+    assert isinstance(settings, Settings)
+    url = _role_url(settings, "profitsamurai_app", settings.app_db_password, database_name)
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version_num FROM public.alembic_version"))
+            rows = result.scalars()
+            versions = [str(value) for value in rows]
+    finally:
+        await engine.dispose()
+    assert versions == ["001_tenant"]
+    return versions[0]
+
+
+async def _database_privilege(
+    admin_url: str,
+    role: str,
+    database_name: str,
+    privilege: str,
+) -> bool:
+    engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            allowed = await conn.scalar(
+                text("SELECT has_database_privilege(:role, :database_name, :privilege)"),
+                {"role": role, "database_name": database_name, "privilege": privilege},
+            )
+    finally:
+        await engine.dispose()
+    return bool(allowed)
+
+
+async def _schema_privilege(
+    settings: object,
+    role: str,
+    database_name: str,
+    schema_name: str,
+    privilege: str,
+) -> bool:
+    from profitsamurai.config import Settings
+
+    assert isinstance(settings, Settings)
+    engine = create_async_engine(
+        _role_url(settings, "profitsamurai_app", settings.app_db_password, database_name),
+        poolclass=NullPool,
+    )
+    try:
+        async with engine.connect() as conn:
+            allowed = await conn.scalar(
+                text("SELECT has_schema_privilege(:role, :schema_name, :privilege)"),
+                {"role": role, "schema_name": schema_name, "privilege": privilege},
+            )
+    finally:
+        await engine.dispose()
+    return bool(allowed)
+
+
+async def _assert_datalens_restored(settings: object, database_name: str) -> None:
+    from profitsamurai.config import Settings
+
+    assert isinstance(settings, Settings)
+    assert await _database_privilege(
+        settings.postgres_admin_url,
+        "profitsamurai_datalens",
+        database_name,
+        "CONNECT",
+    )
+    assert await _schema_privilege(
+        settings, "profitsamurai_datalens", database_name, "analytics", "USAGE"
+    )
+    assert not await _schema_privilege(
+        settings, "profitsamurai_datalens", database_name, "analytics", "CREATE"
+    )
+    assert not await _schema_privilege(
+        settings, "profitsamurai_datalens", database_name, "raw", "USAGE"
+    )
+    assert not await _schema_privilege(
+        settings, "profitsamurai_datalens", database_name, "ref", "USAGE"
+    )
 
 
 async def _schema_names(settings: object, database_name: str) -> list[str]:

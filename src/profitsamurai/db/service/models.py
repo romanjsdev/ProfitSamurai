@@ -1,8 +1,6 @@
 """Service database registry.
 
-Revision 001 calls ServiceBase.metadata.create_all. That base stays empty so a
-fresh upgrade does not create the registry tables twice: revision 002 creates
-them explicitly. Registry models use a separate metadata.
+Tables are created by the explicit operations in revision 001_registry.
 """
 
 from uuid import UUID
@@ -20,14 +18,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class ServiceBase(DeclarativeBase):
-    """Metadata used by revision 001. It intentionally has no tables."""
+    """Metadata for clients, client_databases, and shops."""
 
 
-class RegistryBase(DeclarativeBase):
-    """Tables created by revision 002_client_registry."""
-
-
-class Client(RegistryBase):
+class Client(ServiceBase):
     """A seller company. This is not a Yandex cabinet and not a person."""
 
     __tablename__ = "clients"
@@ -36,7 +30,7 @@ class Client(RegistryBase):
     name: Mapped[str] = mapped_column(Text)
 
 
-class ClientDatabase(RegistryBase):
+class ClientDatabase(ServiceBase):
     """Name and provisioning status of that company's physical database."""
 
     __tablename__ = "client_databases"
@@ -56,7 +50,7 @@ class ClientDatabase(RegistryBase):
     status: Mapped[str] = mapped_column(Text)
 
 
-class Shop(RegistryBase):
+class Shop(ServiceBase):
     """A marketplace connection owned by one client."""
 
     __tablename__ = "shops"
