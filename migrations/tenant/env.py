@@ -1,9 +1,10 @@
 import asyncio
+import os
 import sys
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -13,13 +14,24 @@ if SRC.is_dir():
     sys.path.insert(0, str(SRC))
 
 from profitsamurai.db.tenant.models import TenantBase  # noqa: E402
+from profitsamurai.db.tenant_guard import (  # noqa: E402
+    TenantMigrationTargetError,
+    assert_connected_database,
+    resolve_tenant_url,
+)
 
 config = context.config
 target_metadata = TenantBase.metadata
 
 
+def _apply_target() -> str:
+    url = resolve_tenant_url(config.get_main_option("sqlalchemy.url"))
+    config.set_main_option("sqlalchemy.url", url)
+    return url
+
+
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = _apply_target()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -32,6 +44,16 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    current_database = connection.scalar(text("SELECT current_database()"))
+    current_user = connection.scalar(text("SELECT current_user"))
+    if not isinstance(current_database, str) or not isinstance(current_user, str):
+        raise TenantMigrationTargetError("connected database could not be read")
+    assert_connected_database(
+        current_database,
+        current_user,
+        os.environ.get("TENANT_DATABASE_NAME", ""),
+    )
+    connection.rollback()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -42,6 +64,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
+    _apply_target()
     section = config.get_section(config.config_ini_section, {})
     connectable = async_engine_from_config(
         section,

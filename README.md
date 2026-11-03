@@ -37,3 +37,11 @@ curl.exe -s -X POST http://localhost:8000/clients/ID/shops -H "Content-Type: app
 ```json
 [{"business_id": 1, "campaign_ids": [10, 11]}]
 ```
+
+Импорт финансовых отчётов за один календарный месяц:
+
+```powershell
+curl.exe -s -X POST http://localhost:8000/clients/ID/shops/SHOP_ID/finance-imports -H "Content-Type: application/json" -H "X-Bootstrap-Token: change-me" -d "{\`"period_from\`":\`"2026-10-01\`",\`"period_to\`":\`"2026-10-31\`"}"
+```
+
+Ответ — список попыток по отчётам реализации, услугам и платежам. Ключ и ссылка на файл в ответ не входят.

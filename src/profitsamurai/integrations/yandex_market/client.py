@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import Self
 
@@ -60,8 +62,10 @@ class YandexMarketClient:
         path: str,
         body: JsonObject,
         params: dict[str, str] | None = None,
+        *,
+        idempotent: bool = True,
     ) -> JsonObject:
-        return await self._send("POST", path, params=params, body=body)
+        return await self._send("POST", path, params=params, body=body, idempotent=idempotent)
 
     async def _send(
         self,
@@ -70,23 +74,32 @@ class YandexMarketClient:
         *,
         params: dict[str, str] | None,
         body: JsonObject | None,
+        idempotent: bool = True,
     ) -> JsonObject:
         http = self._require_http()
         for attempt in range(1, self._attempts + 1):
             try:
                 response = await http.request(method, path, params=params, json=body)
             except httpx.TransportError:
-                if attempt == self._attempts:
+                if not idempotent or attempt == self._attempts:
                     raise
                 await asyncio.sleep(self._wait_seconds)
                 continue
             if response.status_code in {420, 429}:
-                if attempt == self._attempts:
-                    raise RateLimitError("rate limited", status_code=response.status_code)
-                await asyncio.sleep(self._wait_seconds)
-                continue
+                delay = rate_limit_wait_seconds(
+                    response.headers,
+                    fallback=self._wait_seconds if idempotent else 120,
+                )
+                if idempotent and attempt < self._attempts:
+                    await asyncio.sleep(delay)
+                    continue
+                raise RateLimitError(
+                    "rate limited",
+                    status_code=response.status_code,
+                    wait_seconds=delay,
+                )
             if response.status_code >= 500:
-                if attempt == self._attempts:
+                if not idempotent or attempt == self._attempts:
                     raise TransientStatusError(
                         f"status {response.status_code}",
                         status_code=response.status_code,
@@ -100,6 +113,46 @@ class YandexMarketClient:
         if self._http is None:
             raise RuntimeError("Yandex Market client is not open")
         return self._http
+
+
+def rate_limit_wait_seconds(
+    headers: httpx.Headers,
+    *,
+    fallback: float,
+    now: datetime | None = None,
+) -> float:
+    """Prefer Retry-After, then the Market resource window, otherwise the fallback delay."""
+    moment = now or datetime.now(UTC)
+    waits: list[float] = []
+    retry_after = headers.get("Retry-After")
+    if retry_after is not None:
+        parsed = _delay_until(retry_after, moment)
+        if parsed is not None:
+            waits.append(parsed)
+    until = headers.get("X-RateLimit-Resource-Until")
+    if until is not None:
+        parsed = _delay_until(until, moment)
+        if parsed is not None:
+            waits.append(parsed)
+    if not waits:
+        return fallback
+    return min(max(waits), 600)
+
+
+def _delay_until(value: str, now: datetime) -> float | None:
+    try:
+        seconds = float(value)
+    except ValueError:
+        seconds = None
+    if seconds is not None:
+        return seconds if seconds > 0 else None
+    try:
+        target = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=UTC)
+    return (target - now).total_seconds()
 
 
 def _parse_response(response: httpx.Response) -> JsonObject:

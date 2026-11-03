@@ -10,4 +10,5 @@ def test_client_routes() -> None:
         "/clients/{client_id}",
         "/clients/{client_id}/provision",
         "/clients/{client_id}/shops",
+        "/clients/{client_id}/shops/{shop_id}/finance-imports",
     }

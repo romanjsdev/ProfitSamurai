@@ -77,6 +77,13 @@ async def register_client(session: AsyncSession, name: str) -> ClientRecord:
     )
 
 
+async def load_shop(session: AsyncSession, client_id: UUID, shop_id: UUID) -> Shop | None:
+    shop = await session.get(Shop, shop_id)
+    if shop is None or shop.client_id != client_id:
+        return None
+    return shop
+
+
 async def load_client(session: AsyncSession, client_id: UUID) -> ClientRecord | None:
     client = await session.get(Client, client_id)
     database = await session.get(ClientDatabase, client_id)
@@ -304,6 +311,10 @@ async def _write_tenant_campaigns(
             await tenant_session.commit()
     finally:
         await engine.dispose()
+
+
+def tenant_database_url(settings: Settings, database_name: str) -> str:
+    return _tenant_url(settings, database_name)
 
 
 def _tenant_url(settings: Settings, database_name: str) -> str:

@@ -46,7 +46,50 @@
 
 Создаётся отдельно. Схему накатывает `alembic.tenant.ini`, ревизия `001_tenant`. Объекты принадлежат роли `profitsamurai_app`.
 
-Схемы `raw`, `ref` и `analytics` создаются пустыми, кроме таблицы ниже. `raw` пока без таблиц. `analytics` пока без представлений. Роль `profitsamurai_datalens` может подключиться только при статусе `ready` и читать только `analytics`.
+Схемы `raw`, `ref` и `analytics` создаёт ревизия `001_tenant`. `analytics` пока без представлений. Роль `profitsamurai_datalens` может подключиться только при статусе `ready` и читать только `analytics`.
+
+Ревизия `002_finance` добавляет в `raw` журнал импорта финансовых отчётов. Повтор того же периода создаёт новую версию и не удаляет предыдущую.
+
+### Таблица `raw.report_imports`
+
+Одна строка — одна попытка загрузить один отчёт.
+
+| Поле | Тип в Postgres | Зачем |
+| --- | --- | --- |
+| `id` | `uuid`, первичный ключ | Идентификатор попытки. |
+| `shop_id` | `uuid`, не NULL | Магазин из реестра. Внешнего ключа нет: реестр лежит в другой базе. |
+| `business_id` | `bigint`, не NULL | Кабинет Маркета. |
+| `report_type` | `text`, не NULL | `goods_realization`, `marketplace_services` или `united_netting`. |
+| `period_from`, `period_to` | `date`, не NULL | Календарный месяц, включительно. |
+| `campaign_id` | `bigint`, NULL допустим | Кампания для отчёта реализации. Для двух других отчётов пусто. |
+| `yandex_report_id` | `text`, NULL допустим | Идентификатор генерации в Маркете. Ссылка на файл сюда не пишется. |
+| `status` | `text`, не NULL | `running`, `done`, `no_data`, `too_large` или `failed`. |
+| `version` | `integer`, не NULL | Номер версии импорта этого магазина и периода. |
+| `started_at` | `timestamptz`, не NULL | Начало попытки. |
+| `finished_at` | `timestamptz`, NULL допустим | Окончание попытки. |
+| `row_count` | `integer`, не NULL | Сколько строк разобрано. |
+| `error_message` | `text`, NULL допустим | Короткий текст ошибки без ключа и без ссылки на файл. |
+
+### Таблица `raw.report_files`
+
+Оригинальный скачанный файл без изменений.
+
+| Поле | Тип в Postgres | Зачем |
+| --- | --- | --- |
+| `id` | `uuid`, первичный ключ | Идентификатор файла. |
+| `import_id` | `uuid`, не NULL, уникальный, внешний ключ на `raw.report_imports.id` | К какой попытке относится файл. |
+| `content` | `bytea`, не NULL | Байты файла. |
+| `byte_size` | `integer`, не NULL | Размер `content`. |
+
+### Таблица `raw.report_rows`
+
+| Поле | Тип в Postgres | Зачем |
+| --- | --- | --- |
+| `id` | `uuid`, первичный ключ | Идентификатор строки. |
+| `import_id` | `uuid`, не NULL, внешний ключ на `raw.report_imports.id`, индекс | К какой попытке относится строка. |
+| `sheet` | `text`, не NULL | Имя листа внутри архива. |
+| `row_number` | `integer`, не NULL | Порядковый номер внутри попытки. |
+| `payload` | `jsonb`, не NULL | Строка отчёта как есть, без фиксированного набора колонок. |
 
 ### Таблица `ref.campaigns`
 
