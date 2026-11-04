@@ -1,5 +1,6 @@
 """Write financial report attempts into one client's database."""
 
+import hashlib
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
@@ -77,6 +78,7 @@ class SqlReportStore:
                     import_id=import_id,
                     content=content,
                     byte_size=len(content),
+                    content_sha256=hashlib.sha256(content).hexdigest(),
                 )
             )
             await session.commit()

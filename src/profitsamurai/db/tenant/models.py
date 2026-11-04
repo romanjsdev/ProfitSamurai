@@ -82,7 +82,13 @@ class ReportFile(TenantBase):
     """The original downloaded report, kept exactly as Yandex sent it."""
 
     __tablename__ = "report_files"
-    __table_args__ = {"schema": "raw"}
+    __table_args__ = (
+        CheckConstraint(
+            "content_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_report_files_content_sha256",
+        ),
+        {"schema": "raw"},
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     import_id: Mapped[UUID] = mapped_column(
@@ -92,6 +98,7 @@ class ReportFile(TenantBase):
     )
     content: Mapped[bytes] = mapped_column(LargeBinary)
     byte_size: Mapped[int] = mapped_column(Integer)
+    content_sha256: Mapped[str] = mapped_column(Text)
 
 
 class ReportRow(TenantBase):

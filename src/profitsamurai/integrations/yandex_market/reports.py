@@ -16,7 +16,6 @@ from profitsamurai.integrations.yandex_market.client import YandexMarketClient
 from profitsamurai.jsonutil import (
     JsonObject,
     JsonValue,
-    as_object_list,
     expect_json,
     loads,
     nested_object,
@@ -271,41 +270,61 @@ def _parse_zip(content: bytes) -> list[tuple[str, JsonObject]]:
         total += info.file_size
         if total > _MAX_UNCOMPRESSED_BYTES:
             raise ReportParseError("report file could not be read")
-        sheet = name.rsplit("/", 1)[-1].removesuffix(".json") or "report"
-        rows.extend(_rows_from_document(archive.read(name), sheet))
+        rows.extend(_rows_from_document(archive.read(name), name))
     return rows
 
 
-def _rows_from_document(content: bytes, sheet: str) -> list[tuple[str, JsonObject]]:
+def _rows_from_document(content: bytes, source: str) -> list[tuple[str, JsonObject]]:
     try:
         parsed = expect_json(loads(content))
     except (ValueError, TypeError, UnicodeError) as exc:
         raise ReportParseError("report file could not be read") from exc
     collected: list[tuple[str, JsonObject]] = []
-    _collect(parsed, sheet, collected)
+    _collect(parsed, source, collected)
     return collected
 
 
-def _collect(value: JsonValue, sheet: str, collected: list[tuple[str, JsonObject]]) -> None:
+def _collect(value: JsonValue, source: str, collected: list[tuple[str, JsonObject]]) -> None:
+    sheet = _sheet_name(source)
     if isinstance(value, dict):
         rows = value.get("rows")
         if isinstance(rows, list):
-            for item in as_object_list(rows):
-                collected.append((sheet, item))
+            collected.extend((sheet, item) for item in _object_rows(rows, source))
             return
         nested = False
         for key, item in value.items():
-            if isinstance(item, list) and as_object_list(item):
-                nested = True
-                for row in as_object_list(item):
-                    collected.append((f"{sheet}:{key}", row))
+            if not isinstance(item, list) or not _contains_object(item):
+                continue
+            nested = True
+            collected.extend(
+                (f"{sheet}:{key}", row) for row in _object_rows(item, f"{source}:{key}")
+            )
         if nested:
             return
         collected.append((sheet, value))
         return
     if isinstance(value, list):
-        for item in as_object_list(value):
-            collected.append((sheet, item))
+        collected.extend((sheet, item) for item in _object_rows(value, source))
+
+
+def _object_rows(items: list[JsonValue], source: str) -> list[JsonObject]:
+    """Keep every object, including exact repeats. A non-object is an error."""
+    rows: list[JsonObject] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            raise ReportParseError(
+                f"report parse failed: file {source} element {index} is not an object"
+            )
+        rows.append(item)
+    return rows
+
+
+def _contains_object(items: list[JsonValue]) -> bool:
+    return any(isinstance(item, dict) for item in items)
+
+
+def _sheet_name(source: str) -> str:
+    return source.rsplit("/", 1)[-1].removesuffix(".json") or "report"
 
 
 def _limited_body(content: bytes, max_bytes: int) -> bytes:

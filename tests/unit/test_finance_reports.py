@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import logging
@@ -20,6 +21,7 @@ from profitsamurai.finance import (
     import_reports,
     public_error,
 )
+from profitsamurai.finance_recovery import classify_running_import
 from profitsamurai.integrations.yandex_market.client import (
     YandexMarketClient,
     rate_limit_wait_seconds,
@@ -27,6 +29,7 @@ from profitsamurai.integrations.yandex_market.client import (
 from profitsamurai.integrations.yandex_market.errors import YandexMarketError
 from profitsamurai.integrations.yandex_market.reports import (
     ReportDownloadError,
+    ReportParseError,
     ShopCampaign,
     build_report_requests,
     download_report_file,
@@ -195,6 +198,19 @@ def test_parser_keeps_json_rows_from_a_zip() -> None:
     content = _zip({"delivered.json": [{"sku": "a", "amount": 1}], "empty.json": {"rows": []}})
     rows = parse_report_bytes(content)
     assert rows == [("delivered", {"sku": "a", "amount": 1})]
+
+
+def test_parser_keeps_exact_duplicate_rows() -> None:
+    content = _zip({"delivered.json": [{"sku": "a"}, {"sku": "a"}]})
+    rows = parse_report_bytes(content)
+    assert rows == [("delivered", {"sku": "a"}), ("delivered", {"sku": "a"})]
+
+
+def test_parser_rejects_a_non_object_and_names_the_file_and_position() -> None:
+    content = _zip({"delivered.json": [{"sku": "a"}, "secret-token", {"sku": "b"}]})
+    with pytest.raises(ReportParseError, match="delivered.json element 2") as caught:
+        parse_report_bytes(content)
+    assert "secret-token" not in str(caught.value)
 
 
 async def test_import_saves_file_rows_and_a_new_version(caplog: pytest.LogCaptureFixture) -> None:
@@ -366,6 +382,98 @@ async def test_a_lost_generate_response_is_not_posted_again() -> None:
     ] * 3
 
 
+def test_a_running_import_is_abandoned_only_when_the_shop_lock_is_free() -> None:
+    assert classify_running_import(shop_lock_held=False) == "abandoned"
+    assert classify_running_import(shop_lock_held=True) == "active_or_unidentified"
+
+
+async def test_finalize_failure_keeps_the_saved_row_count() -> None:
+    archive = _zip({"sheet.json": [{"sku": "a"}, {"sku": "a"}]})
+    store = _MemoryStore()
+    store.fail_next_finish = True
+    result = await _import(store, archive, campaigns=[FBY])
+    assert result.reports[0].status == "failed"
+    assert result.reports[0].error_message == "report finalize failed"
+    assert result.reports[0].row_count == 2
+    assert store.finish_calls[:2] == [("done", 2), ("failed", 2)]
+    assert ("failed", 0) not in store.finish_calls
+    failed = next(item for item in store.items.values() if item.status == "failed")
+    assert failed.row_count == 2
+    assert store.rows[next(key for key, item in store.items.items() if item is failed)] == [
+        (1, "sheet", {"sku": "a"}),
+        (2, "sheet", {"sku": "a"}),
+    ]
+
+
+async def test_unrecorded_finalize_failure_does_not_zero_the_count() -> None:
+    archive = _zip({"sheet.json": [{"sku": "a"}]})
+    store = _MemoryStore()
+    store.fail_all_finishes = True
+    result = await _import(store, archive, campaigns=[FBY])
+    assert result.reports[0].status == "running"
+    assert result.reports[0].row_count == 1
+    assert result.reports[0].error_message == "report finalize failed"
+    assert all(count == 1 for _status, count in store.finish_calls)
+    assert store.items[UUID(int=1)].status == "running"
+    assert store.rows[UUID(int=1)] == [(1, "sheet", {"sku": "a"})]
+
+
+async def test_download_parse_and_save_failures_stay_distinct() -> None:
+    def reject_download(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(404)
+
+    store = _MemoryStore()
+    downloaded = await _import(
+        store,
+        b"{}",
+        campaigns=[FBY],
+        download=reject_download,
+    )
+    assert downloaded.reports[0].status == "failed"
+    assert downloaded.reports[0].error_message == (
+        "report download failed: report file was not downloaded"
+    )
+    assert downloaded.reports[0].row_count == 0
+    assert store.files == {}
+
+    parsed = _MemoryStore()
+    bad = _zip({"delivered.json": [{"sku": "a"}, 5]})
+    parse_result = await _import(parsed, bad, campaigns=[FBY])
+    assert parse_result.reports[0].status == "failed"
+    assert parse_result.reports[0].error_message is not None
+    assert "delivered.json element 2" in parse_result.reports[0].error_message
+    assert parse_result.reports[0].row_count == 0
+    assert bad in parsed.files.values()
+    assert parsed.rows == {}
+
+    saving = _MemoryStore()
+    saving.fail_rows = True
+    archive = _zip({"sheet.json": [{"sku": "a"}]})
+    save_result = await _import(saving, archive, campaigns=[FBY])
+    assert save_result.reports[0].status == "failed"
+    assert save_result.reports[0].error_message == "report row save failed"
+    assert save_result.reports[0].row_count == 0
+    assert archive in saving.files.values()
+    assert saving.rows == {}
+
+
+async def test_a_new_version_keeps_the_previous_file_hash() -> None:
+    first_archive = _zip({"sheet.json": [{"sku": "a"}]})
+    second_archive = _zip({"sheet.json": [{"sku": "b"}]})
+    store = _MemoryStore()
+    await _import(store, first_archive, campaigns=[FBY])
+    first_hash = hashlib.sha256(first_archive).hexdigest()
+    second_hash = hashlib.sha256(second_archive).hexdigest()
+    assert set(store.hashes.values()) == {first_hash}
+    snapshot = dict(store.hashes)
+    await _import(store, second_archive, campaigns=[FBY])
+    for import_id, digest in snapshot.items():
+        assert store.hashes[import_id] == digest == first_hash
+    assert second_hash in store.hashes.values()
+    assert first_hash != second_hash
+
+
 async def test_parallel_import_of_the_same_shop_period_is_rejected() -> None:
     connection = _OneConnection()
 
@@ -431,7 +539,12 @@ class _MemoryStore:
     def __init__(self) -> None:
         self.items: dict[UUID, _Saved] = {}
         self.files: dict[UUID, bytes] = {}
+        self.hashes: dict[UUID, str] = {}
         self.rows: dict[UUID, list[tuple[int, str, JsonObject]]] = {}
+        self.finish_calls: list[tuple[str, int]] = []
+        self.fail_next_finish = False
+        self.fail_all_finishes = False
+        self.fail_rows = False
 
     async def next_version(self, shop_id: UUID, period_from: date, period_to: date) -> int:
         found = [
@@ -467,8 +580,11 @@ class _MemoryStore:
 
     async def save_file(self, import_id: UUID, content: bytes) -> None:
         self.files[import_id] = content
+        self.hashes[import_id] = hashlib.sha256(content).hexdigest()
 
     async def save_rows(self, import_id: UUID, rows: list[tuple[str, JsonObject]]) -> None:
+        if self.fail_rows:
+            raise RuntimeError("rows were not saved")
         self.rows[import_id] = [
             (index, sheet, payload) for index, (sheet, payload) in enumerate(rows, start=1)
         ]
@@ -482,6 +598,10 @@ class _MemoryStore:
         error_message: str | None,
         yandex_report_id: str | None,
     ) -> None:
+        self.finish_calls.append((status, row_count))
+        if self.fail_all_finishes or self.fail_next_finish:
+            self.fail_next_finish = False
+            raise RuntimeError("finish failed")
         item = self.items[import_id]
         item.status = status
         item.row_count = row_count
@@ -512,6 +632,8 @@ async def _import(
     store: _MemoryStore,
     archive: bytes,
     api: object | None = None,
+    campaigns: list[ShopCampaign] | None = None,
+    download: object | None = None,
 ):
     def default_api(request: httpx.Request) -> httpx.Response:
         assert request.headers["Api-Key"] == API_KEY
@@ -521,21 +643,23 @@ async def _import(
 
     handler = default_api if api is None else api
 
-    def download(request: httpx.Request) -> httpx.Response:
+    def default_download(request: httpx.Request) -> httpx.Response:
         assert "api-key" not in {name.lower() for name in request.headers}
         return httpx.Response(200, content=archive)
+
+    download_handler = default_download if download is None else download
 
     return await import_reports(
         api_key=API_KEY,
         base_url="https://api.partner.market.yandex.ru",
         business_id=173963462,
         shop_id=SHOP_ID,
-        campaigns=[FBY, FBS],
+        campaigns=[FBY, FBS] if campaigns is None else campaigns,
         period_from=PERIOD_FROM,
         period_to=PERIOD_TO,
         store=store,
         transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
-        download_transport=httpx.MockTransport(download),
+        download_transport=httpx.MockTransport(download_handler),  # type: ignore[arg-type]
         timeout_seconds=1,
         pause_seconds=0,
         gap_seconds=0,

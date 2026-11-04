@@ -256,6 +256,8 @@ async def _import_one(
         version=version,
     )
     yandex_report_id: str | None = None
+    stage = "generate"
+    saved_rows: int | None = None
     try:
         generated = await _generate(client, request, sleep=sleep, attempts=attempts)
         yandex_report_id = report_id_from(generated)
@@ -279,23 +281,85 @@ async def _import_one(
             message = "report file link is missing"
             await _finish(store, import_id, "failed", 0, message, yandex_report_id)
             return _outcome(request, version, "failed", 0, message, yandex_report_id, False)
+        stage = "download"
         content = await download_report_file(state.file_url, transport=download_transport)
+        stage = "file"
         await store.save_file(import_id, content)
+        stage = "parse"
         rows = parse_report_bytes(content)
+        stage = "rows"
         await store.save_rows(import_id, rows)
-        await _finish(store, import_id, "done", len(rows), None, yandex_report_id)
-        return _outcome(request, version, "done", len(rows), None, yandex_report_id, False)
+        saved_rows = len(rows)
+        stage = "finalize"
+        await _finish(store, import_id, "done", saved_rows, None, yandex_report_id)
+        return _outcome(request, version, "done", saved_rows, None, yandex_report_id, False)
     except Exception as exc:
-        message = public_error(exc)
-        blocks_next = _blocks_next(exc)
-        await store.finish(
+        message = _stage_message(stage, exc)
+        blocks_next = _blocks_next(exc) if stage == "generate" else False
+        row_count = 0 if saved_rows is None else saved_rows
+        recorded = await _record_failure(
+            store,
             import_id,
-            status="failed",
-            row_count=0,
+            row_count=row_count,
             error_message=message,
             yandex_report_id=yandex_report_id,
         )
-        return _outcome(request, version, "failed", 0, message, yandex_report_id, blocks_next)
+        status = "failed" if recorded else "running"
+        return _outcome(
+            request,
+            version,
+            status,
+            row_count,
+            message,
+            yandex_report_id,
+            blocks_next,
+        )
+
+
+def _stage_message(stage: str, exc: BaseException) -> str:
+    """Name the failed step without copying an unsafe exception text."""
+    if stage == "download":
+        if isinstance(exc, ReportDownloadError):
+            detail = str(exc).strip()
+            if detail:
+                return f"report download failed: {detail}"
+        return "report download failed"
+    if stage == "parse":
+        if isinstance(exc, ReportParseError):
+            detail = str(exc).strip()
+            if detail:
+                return detail
+        return "report parse failed"
+    if stage == "file":
+        return "report file save failed"
+    if stage == "rows":
+        return "report row save failed"
+    if stage == "finalize":
+        return "report finalize failed"
+    return public_error(exc)
+
+
+async def _record_failure(
+    store: ReportStore,
+    import_id: UUID,
+    *,
+    row_count: int,
+    error_message: str,
+    yandex_report_id: str | None,
+) -> bool:
+    """Record a failed attempt. A second failure must not zero a saved row count."""
+    try:
+        await store.finish(
+            import_id,
+            status="failed",
+            row_count=row_count,
+            error_message=error_message,
+            yandex_report_id=yandex_report_id,
+        )
+    except Exception:
+        logger.info("finance import %s failure was not recorded", import_id)
+        return False
+    return True
 
 
 def _stored_status(kind: str) -> str:
