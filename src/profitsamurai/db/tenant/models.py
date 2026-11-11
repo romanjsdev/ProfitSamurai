@@ -9,11 +9,13 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -116,3 +118,37 @@ class ReportRow(TenantBase):
     sheet: Mapped[str] = mapped_column(Text)
     row_number: Mapped[int] = mapped_column(Integer)
     payload: Mapped[JsonObject] = mapped_column(JSONB)
+
+
+class ImportExclusion(TenantBase):
+    """One decision to keep a finished import out of analytics until it is lifted."""
+
+    __tablename__ = "import_exclusions"
+    __table_args__ = (
+        CheckConstraint("btrim(reason) <> ''", name="ck_import_exclusions_reason"),
+        CheckConstraint("btrim(basis) <> ''", name="ck_import_exclusions_basis"),
+        Index(
+            "uq_import_exclusions_active",
+            "import_id",
+            unique=True,
+            postgresql_where=text("lifted_at IS NULL"),
+        ),
+        {"schema": "analytics"},
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        Uuid,
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    import_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("raw.report_imports.id", ondelete="CASCADE"),
+    )
+    reason: Mapped[str] = mapped_column(Text)
+    basis: Mapped[str] = mapped_column(Text)
+    excluded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("now()"),
+    )
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

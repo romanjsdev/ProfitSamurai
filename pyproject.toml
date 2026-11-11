@@ -67,3 +67,7 @@ reportMissingTypeStubs = true
 extraPaths = ["src"]
 include = ["src", "tests"]
 pythonVersion = "3.12"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"

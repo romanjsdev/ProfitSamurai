@@ -19,17 +19,25 @@ def test_service_history_has_one_root() -> None:
 
 def test_tenant_history_has_one_root() -> None:
     script = ScriptDirectory.from_config(Config("alembic.tenant.ini"))
-    assert script.get_heads() == ["003_file_sha"]
+    assert script.get_heads() == ["005_analytics_services"]
     root = script.get_revision("001_tenant")
     assert root is not None
     assert root.down_revision is None
-    head = script.get_revision("003_file_sha")
+    previous = script.get_revision("003_file_sha")
+    assert previous is not None
+    assert previous.down_revision == "002_finance"
+    previous_head = script.get_revision("004_analytics_realization")
+    assert previous_head is not None
+    assert previous_head.down_revision == "003_file_sha"
+    head = script.get_revision("005_analytics_services")
     assert head is not None
-    assert head.down_revision == "002_finance"
+    assert head.down_revision == "004_analytics_realization"
     assert sorted(path.name for path in _TENANT.glob("*.py")) == [
         "001_tenant_schema.py",
         "002_finance_reports.py",
         "003_file_sha.py",
+        "004_analytics_realization.py",
+        "005_analytics_services.py",
     ]
 
 

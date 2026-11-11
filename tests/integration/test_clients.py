@@ -100,7 +100,7 @@ async def test_provision_retries_the_same_database(monkeypatch: pytest.MonkeyPat
         assert ready.database_name == database_name
         assert await _database_count(settings.postgres_admin_url, database_name) == 1
         assert await _schema_names(settings, database_name) == ["analytics", "raw", "ref"]
-        assert await _tenant_revision(settings, database_name) == "003_file_sha"
+        assert await _tenant_revision(settings, database_name) == "005_analytics_services"
         await _assert_datalens_restored(settings, database_name)
         await _assert_app_role_cannot_create_database(settings)
         assert await _can_query(
@@ -182,7 +182,7 @@ async def _tenant_revision(settings: object, database_name: str) -> str:
             versions = [str(value) for value in rows]
     finally:
         await engine.dispose()
-    assert versions == ["003_file_sha"]
+    assert versions == ["005_analytics_services"]
     return versions[0]
 
 
